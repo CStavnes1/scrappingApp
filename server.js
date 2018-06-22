@@ -13,6 +13,11 @@ var axios = require("axios");
 var cheerio = require("cheerio");
 var request = require("request")
 
+// Require all models
+var db = require("./models");
+
+var PORT = 3000;
+
 
 // Initialize Express
 var app = express();
@@ -27,73 +32,58 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
 
-// Database configuration
-var databaseUrl = "scraper";
-var collections = ["scrapedData"];
+// Connect to the Mongo DB
+mongoose.connect("mongodb://localhost/Article");
 
-// Hook mongojs configuration to the db variable
-var db = mongojs(databaseUrl, collections);
-db.on("error", function(error) {
-  console.log("Database Error:", error);
-});
-
-
-// Main route (simple Hello World Message)
-// app.get("/", function(req, res) {
-//     res.send("Hello world");
-//   });
   
-  // Retrieve data from the db
-  app.get("/all", function(req, res) {
-    // Find all results from the scrapedData collection in the db
-    db.scrapedData.find({}, function(error, found) {
-      // Throw any errors to the console
-      if (error) {
-        console.log(error);
-      }
-      // If there are no errors, send the data to the browser as json
-      else {
-        res.json(found);
-      }
+// Scrape data from one site and place it into the mongodb db
+app.get("/scrape", function (req, res) {
+  // Make a request for the news section of `espnsoccer`
+  axios.get("http://www.espn.com/soccer/").then(function (response) {
+
+    var $ = cheerio.load(response.data);
+    // For each element with a "title" class
+    $(".contentItem__content").each(function (i, element) {
+      var result = {};
+
+      result.title = $(this)
+        .children("a")
+        .text();
+      result.link = $(this)
+        .children("a")
+        .attr("href");
+
+      // Create a new Article using the `result` object built from scraping
+      db.Article.create(result)
+        .then(function (dbArticle) {
+          // View the added result in the console
+          console.log(dbArticle);
+        })
+        .catch(function (err) {
+          // If an error occurred, send it to the client
+          return res.json(err);
+        });
     });
-  });
-  
-  // Scrape data from one site and place it into the mongodb db
-  app.get("/scrape", function(req, res) {
-    // Make a request for the news section of `espnsoccer`
-    request("http://www.espn.com/soccer/", function(error, response, html) {
-      // Load the html body from request into cheerio
-      var $ = cheerio.load(html);
-      // For each element with a "title" class
-      $(".contentItem__content").each(function(i, element) {
-        // Save the text and href of each link enclosed in the current element
-        var title = $(element).children("a").text();
-        var link = $(element).children("a").attr("href");
-  
-        // If this found element had both a title and a link
-        if (title && link) {
-          // Insert the data in the scrapedData db
-          db.scrapedData.insert({
-            title: title,
-            link: link
-          },
-          function(err, inserted) {
-            if (err) {
-              // Log the error if one is encountered during the query
-              console.log(err);
-            }
-            else {
-              // Otherwise, log the inserted data
-              console.log(inserted);
-            }
-          });
-        }
-      });
-    });
-  
+
     // Send a "Scrape Complete" message to the browser
     res.send("Scrape Complete");
   });
+
+});
+
+
+app.get("/articles", function(req, res) {
+  // Grab every document in the Articles collection
+  db.Article.find({})
+    .then(function(dbArticle) {
+      // If we were able to successfully find Articles, send them back to the client
+      res.json(dbArticle);
+    })
+    .catch(function(err) {
+      // If an error occurred, send it to the client
+      res.json(err);
+    });
+});
   
   
   // Listen on port 3000
